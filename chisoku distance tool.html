@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>千束小学校からの距離測定ツール</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    background: #2c5f2d;
+    color: white;
+    padding: 14px 20px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    z-index: 1000;
+  }
+  header h1 {
+    font-size: 18px;
+    font-weight: 600;
+  }
+  header p {
+    font-size: 12px;
+    opacity: 0.85;
+    margin-top: 2px;
+  }
+  #container {
+    flex: 1;
+    display: flex;
+    position: relative;
+    min-height: 0;
+  }
+  #map {
+    flex: 1;
+    height: 100%;
+  }
+  #panel {
+    width: 280px;
+    background: #fafafa;
+    border-left: 1px solid #ddd;
+    padding: 16px;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+  #panel h2 {
+    font-size: 14px;
+    color: #2c5f2d;
+    margin-bottom: 8px;
+    border-bottom: 2px solid #2c5f2d;
+    padding-bottom: 4px;
+  }
+  .info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: white;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+  }
+  .info-label {
+    font-size: 13px;
+    color: #555;
+  }
+  .info-value {
+    font-size: 16px;
+    font-weight: 700;
+    color: #2c5f2d;
+  }
+  #status {
+    font-size: 12px;
+    color: #888;
+    margin-top: 8px;
+    min-height: 36px;
+  }
+  #instructions {
+    font-size: 12px;
+    color: #444;
+    background: #eef6ee;
+    border-radius: 6px;
+    padding: 10px;
+    margin-bottom: 12px;
+    line-height: 1.6;
+  }
+  #resetBtn {
+    width: 100%;
+    padding: 8px;
+    margin-top: 8px;
+    background: #2c5f2d;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  #resetBtn:hover {
+    background: #1f441f;
+  }
+  .leaflet-popup-content {
+    font-size: 13px;
+  }
+  .spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid #ccc;
+    border-top-color: #2c5f2d;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    vertical-align: middle;
+    margin-right: 6px;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+  @media (max-width: 700px) {
+    #container { flex-direction: column; }
+    #panel { width: 100%; border-left: none; border-top: 1px solid #ddd; }
+    #map { height: 60vh; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📍 千束小学校からの距離測定ツール</h1>
+  <p>台東区立千束小学校（出発地）から地図上の任意の地点までの直線距離・道のりを測定します</p>
+</header>
+
+<div id="container">
+  <div id="map"></div>
+  <div id="panel">
+    <div id="instructions">
+      地図上の任意の場所を<strong>クリック</strong>すると、千束小学校からの距離を計算します。
+    </div>
+
+    <h2>測定結果</h2>
+    <div class="info-row">
+      <span class="info-label">直線距離</span>
+      <span class="info-value" id="straightDist">―</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">道のり（徒歩経路）</span>
+      <span class="info-value" id="routeDist">―</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">徒歩所要時間</span>
+      <span class="info-value" id="routeTime">―</span>
+    </div>
+
+    <div id="status"></div>
+    <button id="resetBtn">リセット</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+  // 千束小学校のおおよその座標（台東区東浅草）
+  const SCHOOL = { lat: 35.71932, lng: 139.79422 };
+
+  const map = L.map('map').setView([SCHOOL.lat, SCHOOL.lng], 15);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+
+  // 学校マーカー
+  const schoolIcon = L.divIcon({
+    html: '<div style="background:#2c5f2d;color:white;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:18px;border:3px solid white;box-shadow:0 2px 5px rgba(0,0,0,0.3);">🏫</div>',
+    className: '',
+    iconSize: [32, 32],
+    iconAnchor: [16, 16]
+  });
+  const schoolMarker = L.marker([SCHOOL.lat, SCHOOL.lng], { icon: schoolIcon })
+    .addTo(map)
+    .bindPopup('<strong>台東区立千束小学校</strong><br>（出発地点）')
+    .openPopup();
+
+  let destMarker = null;
+  let straightLine = null;
+  let routeLine = null;
+
+  const statusEl = document.getElementById('status');
+  const straightDistEl = document.getElementById('straightDist');
+  const routeDistEl = document.getElementById('routeDist');
+  const routeTimeEl = document.getElementById('routeTime');
+
+  const destIcon = L.divIcon({
+    html: '<div style="background:#d9534f;color:white;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:16px;border:3px solid white;box-shadow:0 2px 5px rgba(0,0,0,0.3);">📍</div>',
+    className: '',
+    iconSize: [28, 28],
+    iconAnchor: [14, 14]
+  });
+
+  // 2点間の直線距離（m）をハバーサイン公式で計算
+  function haversineDistance(lat1, lng1, lat2, lng2) {
+    const R = 6371000; // 地球の半径(m)
+    const toRad = deg => deg * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+              Math.sin(dLng/2) * Math.sin(dLng/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+  }
+
+  function formatDistance(meters) {
+    if (meters >= 1000) {
+      return (meters / 1000).toFixed(2) + ' km';
+    }
+    return Math.round(meters) + ' m';
+  }
+
+  function formatDuration(seconds) {
+    const min = Math.round(seconds / 60);
+    if (min >= 60) {
+      const h = Math.floor(min / 60);
+      const m = min % 60;
+      return `${h}時間${m}分`;
+    }
+    return `${min}分`;
+  }
+
+  async function fetchRoute(start, end) {
+    // OSRM 公開デモサーバーを利用（徒歩ルート）
+    const url = `https://router.project-osrm.org/route/v1/foot/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('ルート取得に失敗しました');
+    const data = await res.json();
+    if (!data.routes || data.routes.length === 0) throw new Error('ルートが見つかりません');
+    return data.routes[0];
+  }
+
+  map.on('click', async function(e) {
+    const dest = e.latlng;
+
+    // 既存の表示をクリア
+    if (destMarker) map.removeLayer(destMarker);
+    if (straightLine) map.removeLayer(straightLine);
+    if (routeLine) map.removeLayer(routeLine);
+
+    // 目的地マーカー
+    destMarker = L.marker(dest, { icon: destIcon }).addTo(map);
+
+    // 直線距離を計算して表示
+    const straight = haversineDistance(SCHOOL.lat, SCHOOL.lng, dest.lat, dest.lng);
+    straightDistEl.textContent = formatDistance(straight);
+
+    // 直線を描画
+    straightLine = L.polyline(
+      [[SCHOOL.lat, SCHOOL.lng], [dest.lat, dest.lng]],
+      { color: '#888', weight: 2, dashArray: '6,6' }
+    ).addTo(map);
+
+    // 道のりを取得中
+    routeDistEl.textContent = '―';
+    routeTimeEl.textContent = '―';
+    statusEl.innerHTML = '<span class="spinner"></span>道のりを計算中...';
+
+    try {
+      const route = await fetchRoute(
+        { lat: SCHOOL.lat, lng: SCHOOL.lng },
+        { lat: dest.lat, lng: dest.lng }
+      );
+
+      routeDistEl.textContent = formatDistance(route.distance);
+      routeTimeEl.textContent = formatDuration(route.duration);
+
+      const coords = route.geometry.coordinates.map(c => [c[1], c[0]]);
+      routeLine = L.polyline(coords, { color: '#2c5f2d', weight: 4, opacity: 0.8 }).addTo(map);
+
+      statusEl.textContent = '計算完了';
+    } catch (err) {
+      statusEl.textContent = '⚠ 道のりの取得に失敗しました（' + err.message + '）';
+    }
+
+    destMarker.bindPopup(
+      `<strong>選択地点</strong><br>` +
+      `緯度: ${dest.lat.toFixed(5)}<br>` +
+      `経度: ${dest.lng.toFixed(5)}<br>` +
+      `直線距離: ${formatDistance(straight)}`
+    ).openPopup();
+  });
+
+  document.getElementById('resetBtn').addEventListener('click', function() {
+    if (destMarker) { map.removeLayer(destMarker); destMarker = null; }
+    if (straightLine) { map.removeLayer(straightLine); straightLine = null; }
+    if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+    straightDistEl.textContent = '―';
+    routeDistEl.textContent = '―';
+    routeTimeEl.textContent = '―';
+    statusEl.textContent = '';
+    map.setView([SCHOOL.lat, SCHOOL.lng], 15);
+    schoolMarker.openPopup();
+  });
+</script>
+
+</body>
+</html>
